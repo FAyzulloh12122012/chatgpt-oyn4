@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pakmen - oddiy (HTML/CSS/JS)</title>
+<style>
+  :root{
+    --bg:#000814;
+    --wall:#0b3d91;
+    --dot:#ffd166;
+    --pac:#ffcc00;
+    --ghost1:#ff4d6d;
+    --ghost2:#6fe3ff;
+    --ghost3:#8aff7a;
+    --ghost4:#ffd88a;
+    --hud:#e6eef8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#001219,#001827);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--hud);padding:18px}
+  .wrap{width:100%;max-width:760px}
+  .game-area{display:flex;gap:16px;align-items:start}
+  .canvas-wrap{background:rgba(255,255,255,0.02);padding:12px;border-radius:12px;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+  canvas{display:block;background:#000;border-radius:6px}
+  .panel{min-width:200px;background:rgba(255,255,255,0.03);padding:12px;border-radius:10px}
+  .score{font-size:18px;font-weight:700;color:var(--hud);margin-bottom:8px}
+  .controls p{margin:6px 0;color:rgba(230,238,248,0.8);font-size:14px}
+  .btn{display:inline-block;padding:8px 10px;border-radius:8px;border:0;background:#1b98e0;color:white;cursor:pointer;font-weight:700}
+  .ghost-legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .ghost-swatch{display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;background:rgba(255,255,255,0.02)}
+  .small{font-size:13px;color:rgba(230,238,248,0.75)}
+  footer{margin-top:10px;color:rgba(230,238,248,0.45);font-size:12px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 style="margin:0 0 10px 0">Pakmen — oddiy</h1>
+    <div class="game-area">
+      <div class="canvas-wrap">
+        <canvas id="game" width="560" height="560" aria-label="Pakmen o'yini"></canvas>
+      </div>
+      <div class="panel" role="region" aria-label="Panel">
+        <div class="score" id="score">Score: 0</div>
+        <div class="small">Tugmalar: Arrow keys yoki WASD</div>
+        <div style="margin:8px 0">
+          <button class="btn" id="startBtn">Boshlash</button>
+          <button class="btn" id="restartBtn">Qayta</button>
+        </div>
+        <div class="controls">
+          <p class="small"><strong>Qoidalar:</strong> barcha nuqtalarni yeying. Devorga tegilsa urilsa yoki ghost bilan urishsa o'yin tugaydi.</p>
+          <div class="ghost-legend" id="legend">
+            <div class="ghost-swatch"><div style="width:18px;height:18px;border-radius:4px;background:var(--ghost1)"></div><div class="small">Blinky</div></div>
+            <div class="ghost-swatch"><div style="width:18px;height:18px;border-radius:4px;background:var(--ghost2)"></div><div class="small">Inky</div></div>
+            <div class="ghost-swatch"><div style="width:18px;height:18px;border-radius:4px;background:var(--ghost3)"></div><div class="small">Pinky</div></div>
+            <div class="ghost-swatch"><div style="width:18px;height:18px;border-radius:4px;background:var(--ghost4)"></div><div class="small">Clyde</div></div>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <p class="small">Bu kichik Pac-Man o'yinida tovushlar (chiptune) WebAudio bilan yaratilgan — mualliflik musiqasi emas, oddiy melodiyalar.</p>
+        </div>
+        <footer>Made in HTML/CSS/JS — oddiy versiya</footer>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* --- PAKMEN O'YINI - sodda versiya --- */
+/* Map: 0 = bo'sh, 1 = devor, 2 = dot (yeyiladigan) */
+/* Map grid (20x20) - moslashuv uchun canvas o'lchami 560 => cell=28 */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+
+const W = canvas.width, H = canvas.height;
+const COLS = 20, ROWS = 20;
+const CELL = Math.floor(W / COLS); // 28
+
+// Oddiy map: ramka devor, ichida yo'l va dotlar
+// Quyidagi massivni o'zgartirib labirintni mumkin o'zgartirish
+const rawMap = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,2,1,1,2,1,2,1,1,2,1,1,1,1,2,1],
+  [1,2,2,2,1,2,2,1,2,2,2,1,2,2,2,1,2,2,2,1],
+  [1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,2,1,1,1],
+  [1,2,2,2,2,2,2,2,2,0,0,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,2,1,1,2,1,1,2,1,1,1,2,1,1,2,1],
+  [1,2,2,2,1,2,2,1,2,2,2,1,2,2,2,1,2,2,2,1],
+  [1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,2,1,1,1],
+  [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,2,1,1,2,1,2,1,1,2,1,1,1,1,2,1],
+  [1,2,2,2,1,2,2,1,2,2,2,1,2,2,2,1,2,2,2,1],
+  [1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,2,1,1,1],
+  [1,2,2,2,2,2,2,2,2,0,0,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,2,1,1,2,1,1,2,1,1,1,2,1,1,2,1],
+  [1,2,2,2,1,2,2,1,2,2,2,1,2,2,2,1,2,2,2,1],
+  [1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,2,1,1,1],
+  [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+  [1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+// Game state
+let map = [];
+let pac = { x:1, y:1, dir:{x:0,y:0}, nextDir:{x:0,y:0}, mouth:0 }; // mouth for animation
+let score = 0;
+let totalDots = 0;
+let ghosts = [];
+let running = false;
+let gameOver = false;
+let tickTimer = null;
+const TICK = 140; // ms per tick
+
+// Audio (WebAudio) - simple chiptune
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudio(){
+  if (!audioCtx) audioCtx = new AudioCtx();
+}
+function playTone(freq, dur=0.12, type='sine', when=0){
+  ensureAudio();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  o.connect(g); g.connect(audioCtx.destination);
+  g.gain.setValueAtTime(0.0001, audioCtx.currentTime + when);
+  g.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + when + 0.01);
+  o.start(audioCtx.currentTime + when);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + when + dur);
+  o.stop(audioCtx.currentTime + when + dur + 0.02);
+}
+function playEatMelody(){
+  playTone(880,0.08,'square');
+  playTone(1100,0.06,'square',0.09);
+}
+function playDeath(){
+  playTone(200,0.15,'sawtooth');
+  playTone(120,0.18,'sawtooth',0.18);
+}
+function playStartTune(){
+  playTone(660,0.12,'sine');
+  playTone(880,0.12,'sine',0.12);
+  playTone(1100,0.12,'sine',0.24);
+}
+
+// Helpers
+function cloneMap(){
+  return rawMap.map(r=>r.slice());
+}
+function countDots(m){
+  let c=0;
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) if(m[y][x]===2) c++;
+  return c;
+}
+
+// Ghost creation
+function createGhost(x,y,color){
+  return { x, y, dir:{x:0,y:0}, color, scatterTimer:0 };
+}
+
+// Initialize
+function reset(){
+  map = cloneMap();
+  totalDots = countDots(map);
+  pac = { x:1, y:1, dir:{x:0,y:0}, nextDir:{x:0,y:0}, mouth:0 };
+  score = 0; updateScore();
+  ghosts = [
+    createGhost(9,9,'var(--ghost1)'),
+    createGhost(10,9,'var(--ghost2)'),
+    createGhost(9,10,'var(--ghost3)'),
+    createGhost(10,10,'var(--ghost4)'),
+  ];
+  running = false;
+  gameOver = false;
+  clearInterval(tickTimer);
+  render();
+}
+
+// Movement helpers
+function canMove(x,y){
+  if(x<0||y<0||x>=COLS||y>=ROWS) return false;
+  return map[y][x] !== 1;
+}
+function tryTurn(){
+  const nx = pac.x + pac.nextDir.x;
+  const ny = pac.y + pac.nextDir.y;
+  if(canMove(nx,ny)){
+    pac.dir = {...pac.nextDir};
+    pac.nextDir = {x:0,y:0};
+  }
+}
+function movePac(){
+  // first try to turn if requested
+  if(pac.nextDir.x!==0||pac.nextDir.y!==0) tryTurn();
+  const nx = pac.x + pac.dir.x;
+  const ny = pac.y + pac.dir.y;
+  if(canMove(nx,ny)){
+    pac.x = nx; pac.y = ny;
+    // eat dot?
+    if(map[pac.y][pac.x] === 2){
+      map[pac.y][pac.x] = 0;
+      score += 10;
+      playEatMelody();
+      updateScore();
+      // win?
+      if(--totalDots <= 0){
+        // you win -> restart
+        running = false;
+        setTimeout(()=>{ alert('Siz yutdingiz!'); reset(); }, 80);
+      }
+    }
+  } else {
+    // can't move -> stop
+    pac.dir = {x:0,y:0};
+  }
+  // mouth animation
+  pac.mouth = (pac.mouth + 1) % 6;
+}
+
+// Ghost simple AI: random valid direction, avoid immediate reverse
+function stepGhost(g){
+  // if aligned to grid try choose direction occasionally
+  if(Math.random() < 0.8){
+    // compute possible directions
+    const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+    // filter valid
+    const valids = dirs.filter(d=>{
+      const nx = g.x + d.x, ny = g.y + d.y;
+      if(!canMove(nx,ny)) return false;
+      // avoid reverse
+      if(g.dir.x === -d.x && g.dir.y === -d.y) return false;
+      return true;
+    });
+    if(valids.length>0){
+      // bias towards pacman (simple chase): choose direction that reduces distance sometimes
+      valids.sort((a,b)=>{
+        const ax = g.x + a.x, ay=g.y+a.y;
+        const bx = g.x + b.x, by=g.y+b.y;
+        const da = Math.abs(ax - pac.x) + Math.abs(ay - pac.y);
+        const db = Math.abs(bx - pac.x) + Math.abs(by - pac.y);
+        return da - db;
+      });
+      // pick best with some randomness
+      const pick = (Math.random() < 0.7) ? valids[0] : valids[Math.floor(Math.random()*valids.length)];
+      g.dir = pick;
+    } else {
+      g.dir = {x: -g.dir.x, y: -g.dir.y}; // reverse if stuck
+    }
+  }
+  // move
+  const nx = g.x + g.dir.x;
+  const ny = g.y + g.dir.y;
+  if(canMove(nx,ny)){
+    g.x = nx; g.y = ny;
+  } else {
+    g.dir = {x:0,y:0};
+  }
+}
+
+// Check collisions
+function checkCollisions(){
+  for(const g of ghosts){
+    if(g.x === pac.x && g.y === pac.y){
+      // collision -> game over
+      running = false;
+      gameOver = true;
+      playDeath();
+      setTimeout(()=>{ alert('Game Over'); reset(); }, 80);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Main tick
+function tick(){
+  if(!running) return;
+  movePac();
+  // ghosts step
+  for(const g of ghosts) stepGhost(g);
+  checkCollisions();
+  render();
+}
+
+// Draw functions
+function drawCell(x,y){
+  const px = x*CELL, py = y*CELL;
+  const v = map[y][x];
+  if(v === 1){
+    // wall
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--wall').trim() || '#0b3d91';
+    ctx.fillRect(px,py,CELL,CELL);
+    // small bevel
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.strokeRect(px,py,CELL,CELL);
+  } else {
+    // background grid
+    ctx.fillStyle = '#000';
+    ctx.fillRect(px,py,CELL,CELL);
+    if(v === 2){
+      // dot
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--dot').trim() || '#ffd166';
+      const r = Math.max(2, CELL/10);
+      ctx.beginPath();
+      ctx.arc(px + CELL/2, py + CELL/2, r, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawPac(){
+  const px = pac.x*CELL + CELL/2;
+  const py = pac.y*CELL + CELL/2;
+  // rotation based on direction
+  let angle = 0;
+  if(pac.dir.x === 1) angle = 0;
+  if(pac.dir.x === -1) angle = Math.PI;
+  if(pac.dir.y === 1) angle = Math.PI/2;
+  if(pac.dir.y === -1) angle = -Math.PI/2;
+  // mouth animation
+  const mouthOpen = 0.25 + (pac.mouth/6)*0.25; // 0.25..0.5
+  ctx.save();
+  ctx.translate(px,py);
+  ctx.rotate(angle);
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--pac').trim() || '#ffcc00';
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.arc(0,0, CELL/2 - 2, mouthOpen*Math.PI, (2-mouthOpen)*Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawGhost(g){
+  const px = g.x*CELL, py = g.y*CELL;
+  const w = CELL-4, h = CELL-4;
+  const cx = px + 2, cy = py + 2;
+  // body: rounded top + zigzag bottom
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.fillStyle = g.color;
+  // head (circle)
+  ctx.beginPath();
+  ctx.arc(w/2, h/3, w/3, Math.PI, 0);
+  ctx.lineTo(w - 2, h - 6);
+  // zigzag bottom
+  const zig = 5;
+  for(let i=0;i<zig;i++){
+    const step = (w-4)/zig;
+    const x = w - 2 - i*step;
+    const y = h - 6 - ((i%2)?6:0);
+    ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  // eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(w/3, h/3, w/10, 0, Math.PI*2);
+  ctx.arc(2*w/3, h/3, w/10, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(w/3 + 1, h/3, w/20, 0, Math.PI*2);
+  ctx.arc(2*w/3 + 1, h/3, w/20, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function render(){
+  // background
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#001219';
+  ctx.fillRect(0,0,W,H);
+  // draw map
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      drawCell(x,y);
+    }
+  }
+  // draw ghosts behind pac? We'll draw ghosts then pac
+  for(const g of ghosts) drawGhost(g);
+  drawPac();
+  // HUD text small
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(0, H-24, W, 24);
+}
+
+// Score update
+function updateScore(){ scoreEl.textContent = 'Score: ' + score; }
+
+// Input
+document.addEventListener('keydown', (e)=>{
+  if(!running && (e.key === ' ' || e.code === 'Space')) { start(); return; }
+  let d = null;
+  if(e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') d={x:0,y:-1};
+  if(e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') d={x:0,y:1};
+  if(e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') d={x:-1,y:0};
+  if(e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') d={x:1,y:0};
+  if(d){
+    // if immediate move possible then queue as dir, else nextDir
+    pac.nextDir = d;
+    // start audio context on first user action
+    ensureAudio();
+  }
+});
+
+// Touch: simple swipe or tap to start/flap-like turning (tap = right)
+let touchStart = null;
+canvas.addEventListener('touchstart', (e)=>{
+  if(e.touches && e.touches[0]){
+    touchStart = { x:e.touches[0].clientX, y:e.touches[0].clientY };
+  }
+  // start on touch
+  if(!running) start();
+}, {passive:true});
+canvas.addEventListener('touchend', (e)=>{
+  if(!touchStart) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+  if(Math.abs(dx) > Math.abs(dy)){
+    pac.nextDir = dx>0 ? {x:1,y:0} : {x:-1,y:0};
+  } else {
+    pac.nextDir = dy>0 ? {x:0,y:1} : {x:0,y:-1};
+  }
+  touchStart = null;
+});
+
+// Start / Restart
+startBtn.addEventListener('click', start);
+restartBtn.addEventListener('click', ()=>{ reset(); start(); });
+
+function start(){
+  if(running) return;
+  running = true;
+  ensureAudio();
+  playStartTune();
+  clearInterval(tickTimer);
+  tickTimer = setInterval(tick, TICK);
+}
+
+// Initialize and render first frame
+reset();
+render();
+
+/* Optional: pause when window blur */
+window.addEventListener('blur', ()=>{ clearInterval(tickTimer); running = false;});
+window.addEventListener('focus', ()=>{ if(!gameOver && !running) {/* remain paused until user starts */} });
+
+</script>
+</body>
+</html>
